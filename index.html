@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Josiah’s Vault (Drive Sync)</title>
 
+  <!-- Google Identity Services -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 
   <style>
@@ -39,6 +40,7 @@
     .dlg-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
     .small{font-size:12px}
     code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}
+    .log{white-space:pre-wrap;background:#0b0d11;border:1px solid var(--line);border-radius:12px;padding:10px;color:#cfd6e6;font-size:12px}
   </style>
 </head>
 
@@ -59,13 +61,14 @@
 
 <main>
   <p class="muted">
-    This version stores inventory in Google Drive and uploads photos as separate Drive files.
-    Open on any device, sign in, and it stays up to date.
+    Minimal Drive-synced inventory. If something fails, the full Google API error will show below.
   </p>
 
   <div id="list" class="grid"></div>
-
   <p id="empty" class="muted" style="display:none">No items yet. Click “Add item”.</p>
+
+  <h3 style="margin-top:18px;font-size:14px">Debug log</h3>
+  <div id="log" class="log">Ready.</div>
 </main>
 
 <dialog id="dlg">
@@ -114,6 +117,7 @@ var syncPill = document.getElementById('syncPill');
 
 var list = document.getElementById('list');
 var empty = document.getElementById('empty');
+var logEl = document.getElementById('log');
 
 var dlg = document.getElementById('dlg');
 var btnClose = document.getElementById('btnClose');
@@ -122,6 +126,11 @@ var inName = document.getElementById('inName');
 var inNotes = document.getElementById('inNotes');
 var inPhoto = document.getElementById('inPhoto');
 var dlgStatus = document.getElementById('dlgStatus');
+
+function log(msg){
+  var t = new Date().toLocaleTimeString();
+  logEl.textContent = "["+t+"] " + msg + "\n\n" + logEl.textContent;
+}
 
 function setPill(text, kind){
   syncPill.textContent = text;
@@ -162,11 +171,9 @@ function render(){
     if(it.imageFileId){
       var img = document.createElement('img');
       img.alt = it.name || 'Item image';
-      img.src = driveImageUrl(it.imageFileId);
-      // token is required; browser will send request without auth header, so we must fetch+blob
-      // We'll lazy-load via authenticated fetch:
-      loadDriveImageInto(img, it.imageFileId);
+      img.src = '';
       card.appendChild(img);
+      loadDriveImageInto(img, it.imageFileId);
     }
 
     list.appendChild(card);
@@ -177,10 +184,16 @@ async function loadDriveImageInto(imgEl, fileId){
   try{
     if(!isTokenValid()) return;
     var r = await driveFetch(`https://www.googleapis.com/drive/v3/files/\${fileId}?alt=media`);
-    if(!r.ok) return;
+    if(!r.ok){
+      var t = await r.text();
+      log("Image fetch failed: " + r.status + " " + t);
+      return;
+    }
     var blob = await r.blob();
     imgEl.src = URL.createObjectURL(blob);
-  }catch(e){}
+  }catch(e){
+    log("Image fetch exception: " + e.message);
+  }
 }
 
 /* ========= AUTH ========= */
@@ -215,7 +228,8 @@ function signInGoogle(cb) {
     cb(gToken);
   };
 
-  client.requestAccessToken({ prompt: 'consent' }); // use consent to avoid silent weirdness on iOS
+  // Force consent to avoid "silent" account mismatch weirdness (esp. iOS)
+  client.requestAccessToken({ prompt: 'consent' });
 }
 
 /* ========= DRIVE HELPERS ========= */
@@ -234,8 +248,13 @@ async function ensureVaultDataFile() {
   var r = await driveFetch(url);
   var data = await r.json();
 
+  if (!r.ok) {
+    throw new Error("Drive search vault file failed: " + r.status + " " + JSON.stringify(data));
+  }
+
   if (data.files && data.files[0]) {
     gDriveFileId = data.files[0].id;
+    log("Found vault file id: " + gDriveFileId);
     return gDriveFileId;
   }
 
@@ -245,7 +264,9 @@ async function ensureVaultDataFile() {
     body: JSON.stringify({ name: VAULT_FILENAME, mimeType: 'application/json' })
   });
   var f = await cr.json();
+  if (!cr.ok || !f.id) throw new Error('Create vault_data.json failed: ' + cr.status + ' ' + JSON.stringify(f));
   gDriveFileId = f.id;
+  log("Created vault file id: " + gDriveFileId);
   return gDriveFileId;
 }
 
@@ -257,8 +278,13 @@ async function ensureImagesFolder() {
   var r = await driveFetch(url);
   var data = await r.json();
 
+  if (!r.ok) {
+    throw new Error("Drive search images folder failed: " + r.status + " " + JSON.stringify(data));
+  }
+
   if (data.files && data.files[0]) {
     gImagesFolderId = data.files[0].id;
+    log("Found images folder id: " + gImagesFolderId);
     return gImagesFolderId;
   }
 
@@ -268,14 +294,19 @@ async function ensureImagesFolder() {
     body: JSON.stringify({ name: VAULT_IMAGES_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' })
   });
   var folder = await cr.json();
+  if (!cr.ok || !folder.id) throw new Error("Create images folder failed: " + cr.status + " " + JSON.stringify(folder));
   gImagesFolderId = folder.id;
+  log("Created images folder id: " + gImagesFolderId);
   return gImagesFolderId;
 }
 
 async function loadVaultFromDrive() {
   await ensureVaultDataFile();
   var r = await driveFetch(`https://www.googleapis.com/drive/v3/files/\${gDriveFileId}?alt=media`);
-  if (!r.ok) return null;
+  if (!r.ok) {
+    var t = await r.text();
+    throw new Error("Load vault_data.json failed: " + r.status + " " + t);
+  }
   var text = await r.text();
   if (!text || !text.trim()) return null;
   return JSON.parse(text);
@@ -291,7 +322,11 @@ async function saveVaultToDrive(vaultObj) {
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
     body
   });
-  if (!r.ok) throw new Error('Failed to save vault_data.json to Drive');
+
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error('Failed to save vault_data.json to Drive: ' + r.status + ' ' + t);
+  }
   return true;
 }
 
@@ -320,105 +355,51 @@ async function uploadImageToDrive(file) {
   });
 
   var data = await r.json();
-  if (!r.ok || !data.id) throw new Error('Image upload failed: ' + JSON.stringify(data));
+  if (!r.ok || !data.id) throw new Error('Image upload failed: ' + r.status + ' ' + JSON.stringify(data));
   return data; // {id,name}
-}
-
-function driveImageUrl(fileId) {
-  return `https://www.googleapis.com/drive/v3/files/\${fileId}?alt=media`;
 }
 
 /* ========= ACTIONS ========= */
 async function doSync(){
   setPill('Syncing…', '');
+  log("Sync started");
   try{
     var remote = await loadVaultFromDrive();
     if(remote && remote.items){
       STATE = remote;
+      log("Loaded items: " + STATE.items.length);
+    }else{
+      log("No remote data yet (new file).");
     }
     render();
     setPill('Synced', 'good');
+    log("Sync ok");
   }catch(e){
     console.error(e);
     setPill('Sync failed', 'bad');
+    log("Sync failed: " + e.message);
   }
 }
 
 btnSignIn.onclick = function(){
   setPill('Signing in…', '');
+  log("Sign-in requested");
   signInGoogle(async function(token, err){
     if(err){
       console.error(err);
       setPill('Sign-in failed', 'bad');
+      log("Sign-in failed: " + err.message);
       return;
     }
     btnSync.disabled = false;
     btnAdd.disabled = false;
     setPill('Signed in', 'good');
+    log("Signed in. Token acquired.");
     await doSync();
   });
 };
 
 btnSync.onclick = function(){
   signInGoogle(async function(token, err){
-    if(err){ setPill('Sign-in failed', 'bad'); return; }
-    await doSync();
-  });
-};
-
-btnAdd.onclick = function(){
-  inName.value = '';
-  inNotes.value = '';
-  inPhoto.value = '';
-  dlgStatus.textContent = '';
-  dlg.showModal();
-};
-
-btnClose.onclick = function(){ dlg.close(); };
-
-btnSave.onclick = function(){
-  dlgStatus.textContent = 'Saving…';
-  signInGoogle(async function(token, err){
     if(err){
-      dlgStatus.textContent = 'Sign-in failed: ' + err.message;
-      return;
-    }
-    try{
-      var item = {
-        id: 'it_' + Math.random().toString(16).slice(2) + '_' + Date.now(),
-        name: inName.value.trim(),
-        notes: inNotes.value.trim(),
-        imageFileId: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      var file = inPhoto.files && inPhoto.files[0] ? inPhoto.files[0] : null;
-      if(file){
-        dlgStatus.textContent = 'Uploading image…';
-        var uploaded = await uploadImageToDrive(file);
-        item.imageFileId = uploaded.id;
-      }
-
-      STATE.items = STATE.items || [];
-      STATE.items.push(item);
-
-      dlgStatus.textContent = 'Saving to Drive…';
-      await saveVaultToDrive(STATE);
-
-      dlg.close();
-      render();
-      setPill('Synced', 'good');
-    }catch(e){
-      console.error(e);
-      dlgStatus.textContent = 'Error: ' + e.message;
-      setPill('Save failed', 'bad');
-    }
-  });
-};
-
-/* Initial render */
-render();
-</script>
-</body>
-</
+      setPill('Sign-in failed
