@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <title>Josiah Vault</title>
-<script src="https://apis.google.com/js/api.js"></script>
+
+<!-- NEW Google Identity -->
+<script src="https://accounts.google.com/gsi/client"></script>
+
 <style>
 body{background:#0f0f12;color:white;font-family:sans-serif;text-align:center}
 button{padding:10px;margin:5px;border-radius:8px;border:none;cursor:pointer}
@@ -13,9 +16,10 @@ button{padding:10px;margin:5px;border-radius:8px;border:none;cursor:pointer}
 <body>
 
 <h2>Josiah's Vault</h2>
-<div id="status">Connecting...</div>
 
-<button onclick="manualSave()">💾 Save Now</button>
+<div id="status">Not connected</div>
+
+<button onclick="manualSave()">💾 Save</button>
 <button onclick="logout()">Logout</button>
 
 <br><br>
@@ -32,36 +36,41 @@ const CLIENT_ID = "7602149776-mmmv3vjosb1nhbne3oqi00pkd3lenffb.apps.googleuserco
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
 const FILE_NAME = "vault_data.json";
 
-let token = null;
+let accessToken = null;
 let fileId = null;
 let db = { items: [] };
 
-function init() {
-  gapi.load("client:auth2", async () => {
-    await gapi.client.init({
-      clientId: CLIENT_ID,
-      scope: SCOPES
-    });
+let tokenClient;
 
-    const auth = gapi.auth2.getAuthInstance();
+/* =========================
+   AUTH (FIXED)
+========================= */
+function initAuth() {
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: SCOPES,
+    callback: async (response) => {
+      accessToken = response.access_token;
+      document.getElementById("status").innerText = "✅ Connected";
 
-    if (!auth.isSignedIn.get()) {
-      await auth.signIn();
+      await loadData();
+      render();
     }
-
-    token = auth.currentUser.get().getAuthResponse().access_token;
-
-    document.getElementById("status").innerText = "✅ Connected";
-
-    await loadData();
-    render();
   });
+
+  // trigger login immediately
+  tokenClient.requestAccessToken({ prompt: "consent" });
 }
 
+/* =========================
+   LOAD DATA
+========================= */
 async function loadData() {
   const res = await fetch(
-    "https://www.googleapis.com/drive/v3/files?q=name='" + FILE_NAME + "'",
-    { headers: { Authorization: "Bearer " + token } }
+    `https://www.googleapis.com/drive/v3/files?q=name='${FILE_NAME}'`,
+    {
+      headers: { Authorization: "Bearer " + accessToken }
+    }
   );
 
   const data = await res.json();
@@ -70,26 +79,29 @@ async function loadData() {
     fileId = data.files[0].id;
 
     const fileRes = await fetch(
-      "https://www.googleapis.com/drive/v3/files/" + fileId + "?alt=media",
-      { headers: { Authorization: "Bearer " + token } }
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      {
+        headers: { Authorization: "Bearer " + accessToken }
+      }
     );
 
     db = await fileRes.json();
   }
 }
 
+/* =========================
+   SAVE DATA
+========================= */
 async function saveData() {
   document.getElementById("status").innerText = "Saving...";
 
   const boundary = "foo_bar";
   const body =
-    "--" + boundary + "\r\n" +
-    "Content-Type: application/json\r\n\r\n" +
-    JSON.stringify({ name: FILE_NAME }) + "\r\n" +
-    "--" + boundary + "\r\n" +
-    "Content-Type: application/json\r\n\r\n" +
-    JSON.stringify(db) + "\r\n" +
-    "--" + boundary + "--";
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n` +
+    JSON.stringify({ name: FILE_NAME }) +
+    `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n` +
+    JSON.stringify(db) +
+    `\r\n--${boundary}--`;
 
   let url = "https://www.googleapis.com/upload/drive/v3/files";
   let method = "POST";
@@ -99,18 +111,24 @@ async function saveData() {
     method = "PATCH";
   }
 
-  await fetch(url + "?uploadType=multipart", {
-    method: method,
+  const res = await fetch(url + "?uploadType=multipart", {
+    method,
     headers: {
-      Authorization: "Bearer " + token,
+      Authorization: "Bearer " + accessToken,
       "Content-Type": "multipart/related; boundary=" + boundary
     },
-    body: body
+    body
   });
+
+  const result = await res.json();
+  fileId = result.id || fileId;
 
   document.getElementById("status").innerText = "✅ Saved";
 }
 
+/* =========================
+   IMAGE UPLOAD
+========================= */
 async function uploadImage(file) {
   const metadata = {
     name: file.name,
@@ -119,20 +137,18 @@ async function uploadImage(file) {
 
   const boundary = "foo_bar";
   const body =
-    "--" + boundary + "\r\n" +
-    "Content-Type: application/json\r\n\r\n" +
-    JSON.stringify(metadata) + "\r\n" +
-    "--" + boundary + "\r\n" +
-    "Content-Type: " + file.type + "\r\n\r\n";
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n` +
+    JSON.stringify(metadata) +
+    `\r\n--${boundary}\r\nContent-Type: ${file.type}\r\n\r\n`;
 
-  const blob = new Blob([body, file, "\r\n--" + boundary + "--"]);
+  const blob = new Blob([body, file, `\r\n--${boundary}--`]);
 
   const res = await fetch(
     "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
     {
       method: "POST",
       headers: {
-        Authorization: "Bearer " + token,
+        Authorization: "Bearer " + accessToken,
         "Content-Type": "multipart/related; boundary=" + boundary
       },
       body: blob
@@ -141,13 +157,13 @@ async function uploadImage(file) {
 
   const data = await res.json();
 
-  // make public
+  // MAKE PUBLIC
   await fetch(
-    "https://www.googleapis.com/drive/v3/files/" + data.id + "/permissions",
+    `https://www.googleapis.com/drive/v3/files/${data.id}/permissions`,
     {
       method: "POST",
       headers: {
-        Authorization: "Bearer " + token,
+        Authorization: "Bearer " + accessToken,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -157,25 +173,31 @@ async function uploadImage(file) {
     }
   );
 
-  return "https://drive.google.com/thumbnail?id=" + data.id;
+  return `https://drive.google.com/thumbnail?id=${data.id}`;
 }
 
+/* =========================
+   ADD ITEM (AUTO SAVE)
+========================= */
 async function addItem() {
   const name = document.getElementById("name").value;
   const file = document.getElementById("imageInput").files[0];
 
-  let imageUrl = "";
+  let image = "";
 
   if (file) {
-    imageUrl = await uploadImage(file);
+    image = await uploadImage(file);
   }
 
-  db.items.push({ name, image: imageUrl });
+  db.items.push({ name, image });
 
   render();
-  saveData(); // auto-save
+  saveData();
 }
 
+/* =========================
+   UI RENDER
+========================= */
 function render() {
   const container = document.getElementById("items");
   container.innerHTML = "";
@@ -190,16 +212,25 @@ function render() {
   });
 }
 
+/* =========================
+   MANUAL SAVE
+========================= */
 function manualSave() {
   saveData();
 }
 
+/* =========================
+   LOGOUT
+========================= */
 function logout() {
-  gapi.auth2.getAuthInstance().signOut();
-  location.reload();
+  accessToken = null;
+  document.getElementById("status").innerText = "Logged out";
 }
 
-init();
+/* =========================
+   START
+========================= */
+initAuth();
 </script>
 
 </body>
