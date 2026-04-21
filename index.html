@@ -1,405 +1,355 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Josiah’s Vault (Drive Sync)</title>
-
-  <!-- Google Identity Services -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Vault (Drive Sync)</title>
 
   <style>
-    :root{
-      --bg:#0f1115; --card:#171a21; --txt:#e9ecf1; --muted:#aab2c0;
-      --accent:#7c5cff; --bad:#ff5c7a; --good:#2ee59d; --line:#2a2f3a;
-      --btn:#23283a;
-    }
-    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--txt);}
-    header{padding:16px 16px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(15,17,21,.92);backdrop-filter: blur(8px);}
-    h1{margin:0;font-size:18px;}
+    body{font-family:system-ui,Arial;margin:0;background:#0f1115;color:#e9ecf1}
+    header{padding:14px 16px;border-bottom:1px solid #2a2f3a;position:sticky;top:0;background:#0f1115}
+    button{padding:10px 12px;border-radius:10px;border:1px solid #2a2f3a;background:#23283a;color:#e9ecf1}
+    button.primary{background:#7c5cff;border-color:transparent}
+    button:disabled{opacity:.6}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
-    button{background:var(--btn);color:var(--txt);border:1px solid var(--line);padding:10px 12px;border-radius:10px;cursor:pointer}
-    button.primary{background:var(--accent);border-color:transparent}
-    button:disabled{opacity:.6;cursor:not-allowed}
-    .pill{font-size:12px;padding:6px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted)}
-    .pill.good{border-color:rgba(46,229,157,.35);color:var(--good)}
-    .pill.bad{border-color:rgba(255,92,122,.35);color:var(--bad)}
-    main{padding:16px;max-width:980px;margin:0 auto}
+    .pill{font-size:12px;padding:6px 10px;border:1px solid #2a2f3a;border-radius:999px;color:#aab2c0}
+    .good{color:#2ee59d;border-color:rgba(46,229,157,.35)}
+    .bad{color:#ff5c7a;border-color:rgba(255,92,122,.35)}
+    main{padding:16px;max-width:900px;margin:0 auto}
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
-    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px}
-    .muted{color:var(--muted);font-size:13px}
-    .item-title{font-weight:650}
-    img{max-width:100%;border-radius:12px;border:1px solid var(--line);margin-top:10px}
-    dialog{border:none;border-radius:16px;padding:0;background:var(--card);color:var(--txt);width:min(560px,92vw)}
+    .card{background:#171a21;border:1px solid #2a2f3a;border-radius:14px;padding:12px}
+    img{max-width:100%;border-radius:12px;border:1px solid #2a2f3a;margin-top:10px}
+    input,textarea{width:100%;box-sizing:border-box;margin-top:6px;padding:10px;border-radius:12px;border:1px solid #2a2f3a;background:#0b0d11;color:#e9ecf1}
+    textarea{min-height:70px}
+    .log{white-space:pre-wrap;background:#0b0d11;border:1px solid #2a2f3a;border-radius:12px;padding:10px;color:#cfd6e6;font-size:12px}
+    dialog{border:none;border-radius:16px;padding:0;background:#171a21;color:#e9ecf1;width:min(560px,92vw)}
     dialog::backdrop{background:rgba(0,0,0,.55)}
-    .dlg-h{padding:14px 14px 10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
-    .dlg-b{padding:14px}
-    label{display:block;font-size:12px;color:var(--muted);margin:10px 0 6px}
-    input,textarea{width:100%;box-sizing:border-box;background:#0f1115;color:var(--txt);border:1px solid var(--line);border-radius:12px;padding:10px}
-    textarea{min-height:90px;resize:vertical}
-    .dlg-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
-    .small{font-size:12px}
-    code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}
-    .log{white-space:pre-wrap;background:#0b0d11;border:1px solid var(--line);border-radius:12px;padding:10px;color:#cfd6e6;font-size:12px}
+    .dlgH{padding:12px 14px;border-bottom:1px solid #2a2f3a;display:flex;justify-content:space-between;align-items:center}
+    .dlgB{padding:14px}
   </style>
+
+  <script>
+    // Enable sign-in only when GIS script is loaded
+    function __gisReady(){
+      window.__GIS_LOADED = true;
+      const b = document.getElementById('btnSignIn');
+      if(b) b.disabled = false;
+    }
+  </script>
+  <script src="https://accounts.google.com/gsi/client" async defer onload="__gisReady()"></script>
 </head>
 
 <body>
 <header>
-  <h1>Josiah’s Vault</h1>
+  <div style="font-weight:700">Vault (Drive Sync)</div>
   <div class="row">
-    <button id="btnSignIn" class="primary">Sign in to Google</button>
+    <button id="btnSignIn" class="primary" disabled>Sign in to Google</button>
     <button id="btnSync" disabled>Sync now</button>
     <button id="btnAdd" disabled>Add item</button>
-    <span id="syncPill" class="pill">Not signed in</span>
-  </div>
-  <div class="row">
-    <span class="pill"><span class="muted">Data file:</span> <code>vault_data.json</code></span>
-    <span class="pill"><span class="muted">Images folder:</span> <code>Vault Images</code></span>
+    <span id="pill" class="pill">GIS loading…</span>
   </div>
 </header>
 
 <main>
-  <p class="muted">
-    Minimal Drive-synced inventory. If something fails, the full Google API error will show below.
-  </p>
-
   <div id="list" class="grid"></div>
-  <p id="empty" class="muted" style="display:none">No items yet. Click “Add item”.</p>
+  <p id="empty" class="pill" style="display:none">No items yet.</p>
 
-  <h3 style="margin-top:18px;font-size:14px">Debug log</h3>
+  <h3 style="font-size:14px;margin-top:16px">Debug log</h3>
   <div id="log" class="log">Ready.</div>
 </main>
 
 <dialog id="dlg">
-  <div class="dlg-h">
-    <div style="font-weight:650">Add item</div>
+  <div class="dlgH">
+    <div style="font-weight:700">Add item</div>
     <button id="btnClose">Close</button>
   </div>
-  <div class="dlg-b">
+  <div class="dlgB">
     <label>Name</label>
-    <input id="inName" placeholder="Disappearing cane" />
-
-    <label>Notes</label>
-    <textarea id="inNotes" placeholder="Where it lives, what it is, etc."></textarea>
-
-    <label>Photo (optional)</label>
-    <input id="inPhoto" type="file" accept="image/*" />
-
-    <div class="dlg-actions">
+    <input id="inName" placeholder="Disappearing cane"/>
+    <label style="display:block;margin-top:10px">Notes</label>
+    <textarea id="inNotes" placeholder="Notes…"></textarea>
+    <label style="display:block;margin-top:10px">Photo (optional)</label>
+    <input id="inPhoto" type="file" accept="image/*"/>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
       <button id="btnSave" class="primary">Save</button>
     </div>
-
-    <p class="muted small" id="dlgStatus" style="margin-top:10px"></p>
+    <div id="dlgStatus" class="pill" style="margin-top:10px"> </div>
   </div>
 </dialog>
 
 <script>
-/* ========= CONFIG ========= */
+/* ===== CONFIG ===== */
 var GCLIENT_ID = '7602149776-mmmv3vjosb1nhbne3oqi00pkd3lenffb.apps.googleusercontent.com';
 var SCOPES = 'https://www.googleapis.com/auth/drive.file';
 var VAULT_FILENAME = 'vault_data.json';
 var VAULT_IMAGES_FOLDER_NAME = 'Vault Images';
 
-/* ========= STATE ========= */
-var STATE = { version: 1, updatedAt: null, items: [] };
+/* ===== STATE ===== */
+var STATE = { version:1, updatedAt:null, items:[] };
+var gToken=null, gTokenExpiry=0, gDriveFileId=null, gImagesFolderId=null, gTokenClient=null;
 
-var gToken = null, gTokenExpiry = 0;
-var gDriveFileId = null;
-var gImagesFolderId = null;
-var gTokenClient = null;
+/* ===== UI ===== */
+const btnSignIn = document.getElementById('btnSignIn');
+const btnSync = document.getElementById('btnSync');
+const btnAdd = document.getElementById('btnAdd');
+const pill = document.getElementById('pill');
+const logEl = document.getElementById('log');
+const list = document.getElementById('list');
+const empty = document.getElementById('empty');
 
-/* ========= UI ========= */
-var btnSignIn = document.getElementById('btnSignIn');
-var btnSync = document.getElementById('btnSync');
-var btnAdd = document.getElementById('btnAdd');
-var syncPill = document.getElementById('syncPill');
+const dlg = document.getElementById('dlg');
+const btnClose = document.getElementById('btnClose');
+const btnSave = document.getElementById('btnSave');
+const inName = document.getElementById('inName');
+const inNotes = document.getElementById('inNotes');
+const inPhoto = document.getElementById('inPhoto');
+const dlgStatus = document.getElementById('dlgStatus');
 
-var list = document.getElementById('list');
-var empty = document.getElementById('empty');
-var logEl = document.getElementById('log');
-
-var dlg = document.getElementById('dlg');
-var btnClose = document.getElementById('btnClose');
-var btnSave = document.getElementById('btnSave');
-var inName = document.getElementById('inName');
-var inNotes = document.getElementById('inNotes');
-var inPhoto = document.getElementById('inPhoto');
-var dlgStatus = document.getElementById('dlgStatus');
-
-function log(msg){
-  var t = new Date().toLocaleTimeString();
-  logEl.textContent = "["+t+"] " + msg + "\n\n" + logEl.textContent;
+function log(msg){ logEl.textContent = msg + "\n\n" + logEl.textContent; }
+function setPill(text, cls){
+  pill.textContent = text;
+  pill.className = "pill" + (cls?(" "+cls):"");
 }
 
-function setPill(text, kind){
-  syncPill.textContent = text;
-  syncPill.className = 'pill' + (kind ? (' ' + kind) : '');
-}
+function isTokenValid(){ return gToken && Date.now() < (gTokenExpiry - 60000); }
 
-function render(){
-  list.innerHTML = '';
-  if(!STATE.items || STATE.items.length === 0){
-    empty.style.display = 'block';
-    return;
-  }
-  empty.style.display = 'none';
-
-  STATE.items.slice().reverse().forEach(function(it){
-    var card = document.createElement('div');
-    card.className = 'card';
-
-    var title = document.createElement('div');
-    title.className = 'item-title';
-    title.textContent = it.name || '(unnamed item)';
-    card.appendChild(title);
-
-    if(it.notes){
-      var notes = document.createElement('div');
-      notes.className = 'muted';
-      notes.style.marginTop = '6px';
-      notes.textContent = it.notes;
-      card.appendChild(notes);
-    }
-
-    var meta = document.createElement('div');
-    meta.className = 'muted small';
-    meta.style.marginTop = '10px';
-    meta.textContent = it.updatedAt ? ('Updated: ' + new Date(it.updatedAt).toLocaleString()) : '';
-    card.appendChild(meta);
-
-    if(it.imageFileId){
-      var img = document.createElement('img');
-      img.alt = it.name || 'Item image';
-      img.src = '';
-      card.appendChild(img);
-      loadDriveImageInto(img, it.imageFileId);
-    }
-
-    list.appendChild(card);
-  });
-}
-
-async function loadDriveImageInto(imgEl, fileId){
-  try{
-    if(!isTokenValid()) return;
-    var r = await driveFetch(`https://www.googleapis.com/drive/v3/files/\${fileId}?alt=media`);
-    if(!r.ok){
-      var t = await r.text();
-      log("Image fetch failed: " + r.status + " " + t);
-      return;
-    }
-    var blob = await r.blob();
-    imgEl.src = URL.createObjectURL(blob);
-  }catch(e){
-    log("Image fetch exception: " + e.message);
-  }
-}
-
-/* ========= AUTH ========= */
-function isTokenValid() {
-  return gToken && Date.now() < (gTokenExpiry - 60_000);
-}
-
-function ensureTokenClient() {
-  if (gTokenClient) return gTokenClient;
-  if (!window.google || !google.accounts || !google.accounts.oauth2) {
-    throw new Error('Google Identity Services not loaded yet.');
-  }
+function ensureTokenClient(){
+  if(gTokenClient) return gTokenClient;
+  if(!window.google || !google.accounts || !google.accounts.oauth2) throw new Error("GIS not loaded");
   gTokenClient = google.accounts.oauth2.initTokenClient({
     client_id: GCLIENT_ID,
     scope: SCOPES,
-    callback: function(resp) {}
+    callback: function(resp){}
   });
   return gTokenClient;
 }
 
-function signInGoogle(cb) {
-  if (isTokenValid()) return cb(gToken);
-
-  var client;
-  try { client = ensureTokenClient(); }
-  catch (e) { return cb(null, e); }
-
-  client.callback = function(resp) {
-    if (!resp || resp.error) return cb(null, new Error(resp && resp.error ? resp.error : 'Sign-in failed'));
+function signInGoogle(cb){
+  if(isTokenValid()) return cb(gToken);
+  const client = ensureTokenClient();
+  client.callback = function(resp){
+    if(!resp || resp.error) return cb(null, new Error(resp && resp.error ? resp.error : "sign-in failed"));
     gToken = resp.access_token;
-    gTokenExpiry = Date.now() + (resp.expires_in * 1000);
+    gTokenExpiry = Date.now() + (resp.expires_in*1000);
     cb(gToken);
   };
-
-  // Force consent to avoid "silent" account mismatch weirdness (esp. iOS)
-  client.requestAccessToken({ prompt: 'consent' });
+  client.requestAccessToken({prompt:"consent"});
 }
 
-/* ========= DRIVE HELPERS ========= */
-function driveFetch(url, opts) {
+function driveFetch(url, opts){
   opts = opts || {};
   opts.headers = opts.headers || {};
-  opts.headers['Authorization'] = 'Bearer ' + gToken;
+  opts.headers["Authorization"] = "Bearer " + gToken;
   return fetch(url, opts);
 }
 
-async function ensureVaultDataFile() {
-  if (gDriveFileId) return gDriveFileId;
+async function ensureVaultDataFile(){
+  if(gDriveFileId) return gDriveFileId;
+  const q = `name='${VAULT_FILENAME.replace(/'/g,"\\'")}' and trashed=false`;
+  const url = "https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)";
+  const r = await driveFetch(url);
+  const data = await r.json();
+  if(!r.ok) throw new Error("Search vault file failed: "+r.status+" "+JSON.stringify(data));
+  if(data.files && data.files[0]){ gDriveFileId = data.files[0].id; return gDriveFileId; }
 
-  var q = `name='\${VAULT_FILENAME.replace(/'/g, "\\'")}' and trashed=false`;
-  var url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&fields=files(id,name)';
-  var r = await driveFetch(url);
-  var data = await r.json();
-
-  if (!r.ok) {
-    throw new Error("Drive search vault file failed: " + r.status + " " + JSON.stringify(data));
-  }
-
-  if (data.files && data.files[0]) {
-    gDriveFileId = data.files[0].id;
-    log("Found vault file id: " + gDriveFileId);
-    return gDriveFileId;
-  }
-
-  var cr = await driveFetch('https://www.googleapis.com/drive/v3/files', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: VAULT_FILENAME, mimeType: 'application/json' })
+  const cr = await driveFetch("https://www.googleapis.com/drive/v3/files",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({name:VAULT_FILENAME, mimeType:"application/json"})
   });
-  var f = await cr.json();
-  if (!cr.ok || !f.id) throw new Error('Create vault_data.json failed: ' + cr.status + ' ' + JSON.stringify(f));
+  const f = await cr.json();
+  if(!cr.ok || !f.id) throw new Error("Create vault file failed: "+cr.status+" "+JSON.stringify(f));
   gDriveFileId = f.id;
-  log("Created vault file id: " + gDriveFileId);
   return gDriveFileId;
 }
 
-async function ensureImagesFolder() {
-  if (gImagesFolderId) return gImagesFolderId;
+async function ensureImagesFolder(){
+  if(gImagesFolderId) return gImagesFolderId;
+  const q = `name='${VAULT_IMAGES_FOLDER_NAME.replace(/'/g,"\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const url = "https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)";
+  const r = await driveFetch(url);
+  const data = await r.json();
+  if(!r.ok) throw new Error("Search images folder failed: "+r.status+" "+JSON.stringify(data));
+  if(data.files && data.files[0]){ gImagesFolderId = data.files[0].id; return gImagesFolderId; }
 
-  var q = `name='\${VAULT_IMAGES_FOLDER_NAME.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  var url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(q) + '&fields=files(id,name)';
-  var r = await driveFetch(url);
-  var data = await r.json();
-
-  if (!r.ok) {
-    throw new Error("Drive search images folder failed: " + r.status + " " + JSON.stringify(data));
-  }
-
-  if (data.files && data.files[0]) {
-    gImagesFolderId = data.files[0].id;
-    log("Found images folder id: " + gImagesFolderId);
-    return gImagesFolderId;
-  }
-
-  var cr = await driveFetch('https://www.googleapis.com/drive/v3/files', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: VAULT_IMAGES_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' })
+  const cr = await driveFetch("https://www.googleapis.com/drive/v3/files",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({name:VAULT_IMAGES_FOLDER_NAME, mimeType:"application/vnd.google-apps.folder"})
   });
-  var folder = await cr.json();
-  if (!cr.ok || !folder.id) throw new Error("Create images folder failed: " + cr.status + " " + JSON.stringify(folder));
+  const folder = await cr.json();
+  if(!cr.ok || !folder.id) throw new Error("Create images folder failed: "+cr.status+" "+JSON.stringify(folder));
   gImagesFolderId = folder.id;
-  log("Created images folder id: " + gImagesFolderId);
   return gImagesFolderId;
 }
 
-async function loadVaultFromDrive() {
+async function loadVaultFromDrive(){
   await ensureVaultDataFile();
-  var r = await driveFetch(`https://www.googleapis.com/drive/v3/files/\${gDriveFileId}?alt=media`);
-  if (!r.ok) {
-    var t = await r.text();
-    throw new Error("Load vault_data.json failed: " + r.status + " " + t);
+  const r = await driveFetch(`https://www.googleapis.com/drive/v3/files/${gDriveFileId}?alt=media`);
+  if(!r.ok){
+    const t = await r.text();
+    throw new Error("Load vault failed: "+r.status+" "+t);
   }
-  var text = await r.text();
-  if (!text || !text.trim()) return null;
+  const text = await r.text();
+  if(!text || !text.trim()) return null;
   return JSON.parse(text);
 }
 
-async function saveVaultToDrive(vaultObj) {
+async function saveVaultToDrive(vaultObj){
   await ensureVaultDataFile();
   vaultObj.updatedAt = new Date().toISOString();
+  const body = JSON.stringify(vaultObj);
 
-  var body = JSON.stringify(vaultObj);
-  var r = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/\${gDriveFileId}?uploadType=media`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+  const r = await driveFetch(`https://www.googleapis.com/upload/drive/v3/files/${gDriveFileId}?uploadType=media`,{
+    method:"PATCH",
+    headers:{"Content-Type":"application/json; charset=UTF-8"},
     body
   });
-
-  if (!r.ok) {
+  if(!r.ok){
     const t = await r.text();
-    throw new Error('Failed to save vault_data.json to Drive: ' + r.status + ' ' + t);
+    throw new Error("Save vault failed: "+r.status+" "+t);
   }
   return true;
 }
 
-async function uploadImageToDrive(file) {
+async function uploadImageToDrive(file){
   await ensureImagesFolder();
+  const metadata = { name: (file.name || ("vault_image_"+Date.now()+".jpg")), parents:[gImagesFolderId] };
 
-  var metadata = { name: (file.name || ('vault_image_' + Date.now() + '.jpg')), parents: [gImagesFolderId] };
-  var boundary = '-------vaultboundary' + Math.random().toString(16).slice(2);
-  var delimiter = '\r\n--' + boundary + '\r\n';
-  var closeDelim = '\r\n--' + boundary + '--';
+  const boundary = "-------vaultboundary"+Math.random().toString(16).slice(2);
+  const delimiter = "\r\n--"+boundary+"\r\n";
+  const closeDelim = "\r\n--"+boundary+"--";
 
-  var fileBytes = await file.arrayBuffer();
-  var multipartBody =
+  const bytes = await file.arrayBuffer();
+  const multipartBody =
     delimiter +
-    'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
     JSON.stringify(metadata) +
     delimiter +
-    'Content-Type: ' + (file.type || 'application/octet-stream') + '\r\n\r\n';
+    "Content-Type: "+(file.type||"application/octet-stream")+"\r\n\r\n";
 
-  var blob = new Blob([multipartBody, fileBytes, closeDelim], { type: 'multipart/related; boundary=' + boundary });
+  const blob = new Blob([multipartBody, bytes, closeDelim], {type:"multipart/related; boundary="+boundary});
 
-  var r = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name', {
-    method: 'POST',
-    headers: { 'Content-Type': 'multipart/related; boundary=' + boundary },
+  const r = await driveFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name",{
+    method:"POST",
+    headers:{"Content-Type":"multipart/related; boundary="+boundary},
     body: blob
   });
-
-  var data = await r.json();
-  if (!r.ok || !data.id) throw new Error('Image upload failed: ' + r.status + ' ' + JSON.stringify(data));
-  return data; // {id,name}
+  const data = await r.json();
+  if(!r.ok || !data.id) throw new Error("Image upload failed: "+r.status+" "+JSON.stringify(data));
+  return data;
 }
 
-/* ========= ACTIONS ========= */
-async function doSync(){
-  setPill('Syncing…', '');
-  log("Sync started");
-  try{
-    var remote = await loadVaultFromDrive();
-    if(remote && remote.items){
-      STATE = remote;
-      log("Loaded items: " + STATE.items.length);
-    }else{
-      log("No remote data yet (new file).");
+async function loadDriveImage(fileId, imgEl){
+  const r = await driveFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  if(!r.ok) return;
+  const blob = await r.blob();
+  imgEl.src = URL.createObjectURL(blob);
+}
+
+function render(){
+  list.innerHTML = "";
+  if(!STATE.items || STATE.items.length===0){ empty.style.display="block"; return; }
+  empty.style.display="none";
+  STATE.items.slice().reverse().forEach(async (it)=>{
+    const c = document.createElement("div");
+    c.className="card";
+    c.innerHTML = `<div style="font-weight:700">${(it.name||"(unnamed)")}</div>
+                   <div style="color:#aab2c0;font-size:13px;margin-top:6px">${(it.notes||"")}</div>
+                   <div style="color:#aab2c0;font-size:12px;margin-top:10px">${it.updatedAt?("Updated: "+new Date(it.updatedAt).toLocaleString()):""}</div>`;
+    if(it.imageFileId){
+      const img = document.createElement("img");
+      c.appendChild(img);
+      try{ await loadDriveImage(it.imageFileId, img); }catch(e){}
     }
+    list.appendChild(c);
+  });
+}
+
+async function doSync(){
+  setPill("Syncing…","");
+  try{
+    const remote = await loadVaultFromDrive();
+    if(remote && remote.items) STATE = remote;
     render();
-    setPill('Synced', 'good');
+    setPill("Synced","good");
     log("Sync ok");
   }catch(e){
-    console.error(e);
-    setPill('Sync failed', 'bad');
-    log("Sync failed: " + e.message);
+    setPill("Sync failed","bad");
+    log(e.message);
   }
 }
 
+/* ===== EVENTS ===== */
 btnSignIn.onclick = function(){
-  setPill('Signing in…', '');
-  log("Sign-in requested");
-  signInGoogle(async function(token, err){
-    if(err){
-      console.error(err);
-      setPill('Sign-in failed', 'bad');
-      log("Sign-in failed: " + err.message);
-      return;
-    }
-    btnSync.disabled = false;
-    btnAdd.disabled = false;
-    setPill('Signed in', 'good');
-    log("Signed in. Token acquired.");
+  try{
+    setPill("Signing in…","");
+    signInGoogle(async (token, err)=>{
+      if(err){ setPill("Sign-in failed","bad"); log(err.message); return; }
+      btnSync.disabled=false; btnAdd.disabled=false;
+      setPill("Signed in","good");
+      await doSync();
+    });
+  }catch(e){
+    setPill("GIS not ready","bad");
+    log(e.message);
+  }
+};
+
+btnSync.onclick = function(){
+  signInGoogle(async (token, err)=>{
+    if(err){ setPill("Sign-in failed","bad"); log(err.message); return; }
     await doSync();
   });
 };
 
-btnSync.onclick = function(){
-  signInGoogle(async function(token, err){
-    if(err){
-      setPill('Sign-in failed
+btnAdd.onclick = function(){
+  inName.value=""; inNotes.value=""; inPhoto.value="";
+  dlgStatus.textContent=" ";
+  dlg.showModal();
+};
+
+btnClose.onclick = ()=>dlg.close();
+
+btnSave.onclick = function(){
+  dlgStatus.textContent="Saving…";
+  signInGoogle(async (token, err)=>{
+    if(err){ dlgStatus.textContent="Sign-in failed: "+err.message; return; }
+    try{
+      const item = {
+        id:"it_"+Math.random().toString(16).slice(2)+"_"+Date.now(),
+        name: inName.value.trim(),
+        notes: inNotes.value.trim(),
+        imageFileId: null,
+        updatedAt: new Date().toISOString()
+      };
+
+      const file = inPhoto.files && inPhoto.files[0] ? inPhoto.files[0] : null;
+      if(file){
+        dlgStatus.textContent="Uploading image…";
+        const up = await uploadImageToDrive(file);
+        item.imageFileId = up.id;
+      }
+
+      STATE.items.push(item);
+      dlgStatus.textContent="Saving to Drive…";
+      await saveVaultToDrive(STATE);
+
+      dlg.close();
+      render();
+      setPill("Synced","good");
+      log("Saved item");
+    }catch(e){
+      dlgStatus.textContent="Error: "+e.message;
+      setPill("Save failed","bad");
+      log(e.message);
+    }
+  });
+};
+
+/* Initial */
+setPill(window.__GIS_LOADED ? "Ready" : "GIS loading…", "");
+render();
+</script>
+</body>
+</html>
