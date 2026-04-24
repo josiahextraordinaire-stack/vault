@@ -97,17 +97,19 @@ body::after{content:'';position:fixed;inset:0;background:radial-gradient(ellipse
 .btn-showcase .sparkle{font-size:16px;animation:sparkleFloat 2.8s ease-in-out infinite;}
 @keyframes sparkleFloat{0%,100%{transform:translateY(0) rotate(0deg);}50%{transform:translateY(-2px) rotate(8deg);}}
 .showcase-banner{
-  position:fixed;top:0;left:0;right:0;z-index:140;
-  padding:6px 14px;padding-top:max(6px,env(safe-area-inset-top));
-  background:linear-gradient(90deg,rgba(240,192,64,0.18),rgba(126,184,232,0.18));
-  border-bottom:1px solid rgba(240,192,64,0.35);
-  color:var(--txt);font-size:11px;font-weight:600;text-align:center;letter-spacing:.3px;
-  backdrop-filter:blur(10px);display:none;pointer-events:none;
+  position:fixed;left:14px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:90;
+  padding:7px 12px;max-width:min(62vw,260px);
+  background:linear-gradient(135deg,rgba(22,32,60,0.92),rgba(14,22,44,0.92));
+  border:1px solid rgba(240,192,64,0.45);border-radius:999px;
+  color:var(--txt);font-size:11px;font-weight:600;letter-spacing:.2px;
+  backdrop-filter:blur(14px);box-shadow:0 8px 24px rgba(0,0,0,0.35),0 0 0 1px rgba(240,192,64,0.08);
+  display:none;pointer-events:auto;align-items:center;gap:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.showcase-banner.on{display:block;animation:fadeDown .45s cubic-bezier(.4,0,.2,1) both;}
-.showcase-banner b{color:var(--gold);}
-@keyframes fadeDown{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
-body.showcase #app{padding-top:26px;}
+.showcase-banner.on{display:inline-flex;animation:fadeUpPill .45s cubic-bezier(.34,1.56,.64,1) both;}
+.showcase-banner b{color:var(--gold);font-weight:700;}
+.showcase-banner .sb-exit{color:var(--gold);text-decoration:none;border-left:1px solid rgba(240,192,64,0.25);padding-left:8px;margin-left:2px;cursor:pointer;}
+.showcase-banner .sb-exit:hover{opacity:.85;}
+@keyframes fadeUpPill{from{opacity:0;transform:translateY(10px) scale(.95);}to{opacity:1;transform:translateY(0) scale(1);}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:translateY(0);}}
 
 /* ── HEADER ── */
@@ -586,9 +588,10 @@ body.showcase #app{padding-top:26px;}
   </div>
 </div>
 
-<!-- SHOWCASE MODE BANNER -->
+<!-- SHOWCASE MODE PILL -->
 <div class="showcase-banner" id="showcaseBanner">
-  <span>&#10024; <b>Showcase Mode</b> &mdash; changes aren&rsquo;t saved. <a href="#" id="showcaseExit" style="color:var(--gold);pointer-events:auto;text-decoration:underline;">Exit</a></span>
+  <span>&#10024; <b>Showcase</b></span>
+  <a href="#" id="showcaseExit" class="sb-exit">Exit</a>
 </div>
 
 <!-- ACCOUNT OVERLAY -->
@@ -1336,7 +1339,6 @@ function closeQtyScreen(){
   clearQtyRoute();
 }
 function adjustItemQuantity(itemId,delta){
-  if(showcaseBlock('quantity changes aren\u2019t saved'))return;
   var idx=getItemIndexById(itemId);if(idx<0)return;
   var item=DB.items[idx];if(!item.trackQuantity)return;
   item.quantity=Math.max(0,intVal(item.quantity)+delta);
@@ -1431,6 +1433,7 @@ async function openQrPanel(itemId){
 function isTokenValid(){return gToken&&Date.now()<gTokenExpiry-60000;}
 
 function signInGoogle(cb){
+  if(SHOWCASE_MODE)return; // Never trigger OAuth while in showcase
   if(isTokenValid()){cb(gToken);return;}
   try{
     var client=google.accounts.oauth2.initTokenClient({
@@ -1517,7 +1520,11 @@ document.getElementById('signinBtn').addEventListener('click',function(){
 function enterShowcaseMode(){
   SHOWCASE_MODE=true;
   try{document.body.classList.add('showcase');}catch(e){}
-  // Seed DB from BASE_DB snapshot so the visitor sees real content without touching local storage
+  // HARD ISOLATION: wipe any latent Drive auth/file state and any prior showcase scratch so
+  // this session can't possibly touch vault_data or Google Drive.
+  gToken=null;gTokenExpiry=0;gDriveFileId=null;
+  try{localStorage.removeItem('vault_showcase_data');}catch(e){}
+  // Seed DB from BASE_DB snapshot so the visitor sees real content
   try{
     DB={items:[],containers:[],subcontainers:[],subsubcontainers:[],positions:[],units:[],locations:[]};
     mergeIntoDB(JSON.parse(JSON.stringify(BASE_DB)));
@@ -1525,7 +1532,7 @@ function enterShowcaseMode(){
   }catch(e){}
   // Friendly visitor identity
   gUserName='Showcase';gUserEmail='showcase@demo';gUserAvatar='';updateAvatar();
-  // Swap "Sign out" row for "Exit showcase"
+  // Swap "Sign out" row for "Exit showcase", hide sync
   try{
     var signOutRow=document.querySelector('.account-action.danger');
     if(signOutRow){signOutRow.textContent='\u2190 Exit showcase';signOutRow.setAttribute('onclick','exitShowcase()');}
@@ -1535,10 +1542,12 @@ function enterShowcaseMode(){
   document.getElementById('showcaseBanner').classList.add('on');
   showApp();
   updateFbar();renderItems();updateLowStockButton();
-  setTimeout(function(){flash('&#10024; Welcome to Showcase Mode');},600);
+  setTimeout(function(){flash('&#10024; Showcase \u2014 try anything, nothing saves to Drive');},600);
 }
 function exitShowcase(){
   try{closeAcctMenu();}catch(e){}
+  // Wipe showcase scratch so nothing lingers
+  try{localStorage.removeItem('vault_showcase_data');}catch(e){}
   // Reload to cleanly reset state
   try{var u=new URL(location.href);u.searchParams.delete('showcase');location.replace(u.toString());}
   catch(e){location.reload();}
@@ -1582,6 +1591,7 @@ function closeAcctMenu(){
 
 // ---- GOOGLE DRIVE ----
 function findOrCreateVaultFile(token,cb){
+  if(SHOWCASE_MODE)return; // Hard block: showcase never touches Drive
   if(gDriveFileId){cb(gDriveFileId);return;}
   fetch("https://www.googleapis.com/drive/v3/files?q=name%3D'"+VAULT_FILENAME+"'%20and%20trashed%3Dfalse&fields=files(id,name)",
     {headers:{'Authorization':'Bearer '+token}})
@@ -1634,7 +1644,8 @@ function mergeIntoDB(saved){
 }
 
 function saveToDrive(skipSync){
-  if(SHOWCASE_MODE){if(skipSync!==false)syncPlacementGraph();return;}
+  // Showcase: persist in session-only key, NEVER sync to Drive, NEVER touch vault_data
+  if(SHOWCASE_MODE){saveToLocal(skipSync);return;}
   saveToLocal(skipSync);
   if(!isTokenValid())return;
   var payload=JSON.stringify({items:DB.items,containers:DB.containers,positions:DB.positions,locations:DB.locations,units:DB.units,subcontainers:DB.subcontainers,subsubcontainers:DB.subsubcontainers});
@@ -1647,11 +1658,16 @@ function saveToDrive(skipSync){
 }
 
 function saveToLocal(skipSync){
-  if(SHOWCASE_MODE){if(skipSync!==false)syncPlacementGraph();return;}
   if(skipSync!==false)syncPlacementGraph();
-  try{localStorage.setItem('vault_data',JSON.stringify({items:DB.items,containers:DB.containers,positions:DB.positions,locations:DB.locations,units:DB.units,subcontainers:DB.subcontainers,subsubcontainers:DB.subsubcontainers}));}catch(e){}
+  var payload=JSON.stringify({items:DB.items,containers:DB.containers,positions:DB.positions,locations:DB.locations,units:DB.units,subcontainers:DB.subcontainers,subsubcontainers:DB.subsubcontainers});
+  // HARD ISOLATION: showcase writes to a separate key, NEVER touches vault_data
+  var key=SHOWCASE_MODE?'vault_showcase_data':'vault_data';
+  try{localStorage.setItem(key,payload);}catch(e){}
 }
-function loadFromLocal(){try{var s=localStorage.getItem('vault_data');if(s){mergeIntoDB(JSON.parse(s));rebuildLookups();updateLowStockButton();}}catch(e){}}
+function loadFromLocal(){
+  if(SHOWCASE_MODE)return; // showcase seeds from BASE_DB on entry, not from stored state
+  try{var s=localStorage.getItem('vault_data');if(s){mergeIntoDB(JSON.parse(s));rebuildLookups();updateLowStockButton();}}catch(e){}
+}
 
 // ---- PHOTO UPLOAD ----
 var pendingPhotoFile=null;
@@ -1670,6 +1686,14 @@ function setupPhotoArea(areaId,fileId){
 }
 async function uploadPhoto(file){
   return new Promise(function(resolve,reject){
+    // Showcase: never hit Drive. Inline the image as a data URL so the demo keeps working.
+    if(SHOWCASE_MODE){
+      var r=new FileReader();
+      r.onload=function(e){resolve(e.target.result);};
+      r.onerror=function(){reject(new Error('Could not read image'));};
+      r.readAsDataURL(file);
+      return;
+    }
     signInGoogle(function(token){
       var meta={name:file.name||('vault_'+Date.now()+'.jpg'),mimeType:file.type||'image/jpeg'};
       var form=new FormData();
@@ -2092,7 +2116,6 @@ function openEditItem(idx){
 }
 function addEditTag(){var input=document.getElementById('e-newtag');var val=input.value.trim();if(!val)return;var grid=document.getElementById('e-tags');var btn=document.createElement('button');btn.type='button';btn.className='tag-sel on';btn.dataset.tag=val;btn.textContent=val;btn.addEventListener('click',function(){btn.classList.toggle('on');});grid.appendChild(btn);input.value='';input.focus();}
 async function saveEditItem(idx){
-  if(showcaseBlock('edits aren\u2019t saved'))return;
   var i=DB.items[idx];if(!i)return;
   var name=(document.getElementById('e-name').value||'').trim();
   if(!name){document.getElementById('e-name').style.borderColor='var(--danger)';return;}
@@ -2120,7 +2143,6 @@ async function saveEditItem(idx){
   saveToDrive();document.getElementById('dp').classList.remove('on');renderCurrent();updateLowStockButton();if(document.getElementById('qtyScreen').classList.contains('on')&&qtyScreenItemId===i.id)renderQtyScreen(i.id);flash('\u2713 Item updated!');
 }
 function deleteItem(idx){
-  if(showcaseBlock('deletes aren\u2019t allowed'))return;
   var i=DB.items[idx];if(!i)return;
   if(!confirm('Delete "'+i.name+'"?'))return;
   var code=prompt('Type 99 to permanently delete "'+i.name+'".');
@@ -2271,7 +2293,6 @@ function renderSubcontainerForm(){
   setTimeout(function(){document.getElementById('s-id').focus();},60);
 }
 function saveSubcontainer(){
-  if(showcaseBlock('new items aren\u2019t saved'))return;
   var idEl=document.getElementById('s-id');
   var id=(idEl.value||'').trim();
   if(!id){markInvalid('s-id');idEl.focus();return;}
@@ -2325,7 +2346,6 @@ function renderItemForm(){
 }
 function addTagToForm(){var input=document.getElementById('f-newtag');var val=input.value.trim();if(!val)return;var grid=document.getElementById('f-tags');var btn=document.createElement('button');btn.type='button';btn.className='tag-sel on';btn.dataset.tag=val;btn.textContent=val;btn.addEventListener('click',function(){btn.classList.toggle('on');});grid.appendChild(btn);input.value='';input.focus();}
 async function saveItem(){
-  if(showcaseBlock('new items aren\u2019t saved'))return;
   var name=(document.getElementById('f-name').value||'').trim();
   if(!name){document.getElementById('f-name').style.borderColor='var(--danger)';document.getElementById('f-name').focus();return;}
   var btn=document.getElementById('f-save-btn');btn.disabled=true;btn.textContent='Saving\u2026';
@@ -2376,7 +2396,6 @@ function renderBinForm(){
   },60);
 }
 async function saveBin(){
-  if(showcaseBlock('new bins aren\u2019t saved'))return;
   var id=(document.getElementById('b-id').value||'').trim();
   if(!id){document.getElementById('b-id').style.borderColor='var(--danger)';return;}
   if(cById[id]){alert('Bin #'+id+' already exists!');return;}
@@ -2419,7 +2438,6 @@ function renderShelfForm(){
   },60);
 }
 function saveShelf(){
-  if(showcaseBlock('new shelves aren\u2019t saved'))return;
   var id=(document.getElementById('s-id').value||'').trim();
   var loc=(document.getElementById('s-loc').value||'');
   var unit=(document.getElementById('s-unit').value||'');
@@ -2444,7 +2462,6 @@ function renderLocationForm(){
 }
 function addUnitField(){var list=document.getElementById('l-units-list');var div=document.createElement('div');div.style.cssText='display:flex;gap:8px;align-items:center;';div.innerHTML='<input type="text" class="form-input l-unit-name" placeholder="e.g. Bookshelf A" style="flex:1;"><button type="button" onclick="this.parentNode.remove()" style="background:none;border:none;color:var(--txt3);font-size:20px;cursor:pointer;padding:0 4px;">&#10005;</button>';list.appendChild(div);div.querySelector('input').focus();}
 function saveLocation(){
-  if(showcaseBlock('new locations aren\u2019t saved'))return;
   var name=(document.getElementById('l-name').value||'').trim();
   if(!name){document.getElementById('l-name').style.borderColor='var(--danger)';return;}
   if(DB.locations.find(function(l){return l.name===name;})){alert('Location "'+name+'" already exists!');return;}
