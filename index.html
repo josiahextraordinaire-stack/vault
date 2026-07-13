@@ -605,6 +605,18 @@ body.kiosk #qtyCloseBtn{display:none !important;}
   cursor:pointer;padding:4px 8px;border-radius:8px;transition:background .15s,color .15s;flex-shrink:0;
 }
 .update-banner .upd-x:hover{background:rgba(126,184,232,0.08);color:var(--txt);}
+
+/* ── SORT PILL (Bins + Tags) ── */
+.sortbar{padding:8px 14px 2px;display:flex;justify-content:flex-end;background:transparent;}
+.sort-pill{
+  background:transparent;border:1px solid rgba(126,184,232,0.14);color:var(--txt2);
+  border-radius:12px;padding:5px 11px;font-family:inherit;font-size:11.5px;font-weight:500;
+  cursor:pointer;transition:border-color .15s,background .15s,transform .1s;letter-spacing:.2px;
+  display:inline-flex;align-items:center;gap:4px;
+}
+.sort-pill b{color:var(--gold);font-weight:700;margin-left:2px;}
+.sort-pill:hover{border-color:rgba(240,192,64,0.3);background:rgba(126,184,232,0.04);}
+.sort-pill:active{opacity:.75;transform:scale(.97);}
 </style>
 </head>
 <body>
@@ -659,7 +671,7 @@ body.kiosk #qtyCloseBtn{display:none !important;}
     <div class="account-action" onclick="exportCSV()">&#128196; Export CSV</div>
     <div class="account-action" onclick="openSyncDiagnostics()">&#128376; Sync diagnostics</div>
     <div class="account-action danger" onclick="signOut()">&#8594; Sign out</div>
-    <div class="account-version" id="acctVersion">Vault v24</div>
+    <div class="account-version" id="acctVersion">Vault v25</div>
   </div>
 </div>
 
@@ -2721,16 +2733,102 @@ function smartMatch(fields,qStr){
   });
 }
 
+// ---- SEARCH RANKING + USER SORT ORDER ----
+// Ranks by where/what matched. Name > tag > location; earlier position > later; shorter name breaks ties.
+function _scoreItemMatch(item,r,qStr){
+  var lq=String(qStr).toLowerCase().trim();if(!lq)return 0;
+  var name=(item.name||'').toLowerCase(),nl=name.length||1;
+  var idx=name.indexOf(lq);if(idx>=0)return 1e6-idx*100-nl;
+  var nq=_sm_norm(qStr),nname=_sm_norm(item.name);
+  if(nq){var ni=nname.indexOf(nq);if(ni>=0)return 8e5-ni*100-nl;}
+  var tags=(item.tags||[]).join('|').toLowerCase();
+  var ti=tags.indexOf(lq);if(ti>=0)return 6e5-ti*10;
+  var loc=((r.loc||'')+'|'+(r.unit||'')+'|'+(r.contId||'')+'|'+(r.posId||'')).toLowerCase();
+  var li=loc.indexOf(lq);if(li>=0)return 4e5-li*10;
+  // Fuzzy: closest token-level edit distance on the name.
+  var qtoks=_sm_tok(qStr),htoks=_sm_tok(item.name),best=Infinity;
+  for(var i=0;i<qtoks.length&&best>0;i++){
+    for(var j=0;j<htoks.length;j++){
+      if(htoks[j].indexOf(qtoks[i])>=0||qtoks[i].indexOf(htoks[j])>=0){best=0;break;}
+      var d=_sm_ed(qtoks[i],htoks[j],3);if(d<best)best=d;
+    }
+  }
+  if(best<Infinity)return 2e5-best*1000-nl;
+  return 1e5;
+}
+function _scoreContainerMatch(c,qStr){
+  var lq=String(qStr).toLowerCase().trim();if(!lq)return 0;
+  var name=(c.summary||'').toLowerCase(),nl=name.length||1;
+  var idx=name.indexOf(lq);if(idx>=0)return 1e6-idx*100-nl;
+  var idm=((c.id||'')+'|'+(c.type||'')).toLowerCase();
+  var ii=idm.indexOf(lq);if(ii>=0)return 8e5-ii*10;
+  var loc=(c.location||'').toLowerCase();
+  var li=loc.indexOf(lq);if(li>=0)return 6e5-li*10;
+  return 1e5;
+}
+function _scoreTagMatch(t,qStr){
+  var lq=String(qStr).toLowerCase().trim();if(!lq)return 0;
+  var tl=t.toLowerCase(),idx=tl.indexOf(lq);
+  if(idx>=0)return 1e6-idx*100-tl.length;
+  var nq=_sm_norm(qStr),nt=_sm_norm(t);
+  if(nq){var ni=nt.indexOf(nq);if(ni>=0)return 8e5-ni*100-tl.length;}
+  return 1e5;
+}
+// User-selectable sort for the Bins + Tags tabs. Persisted in localStorage.
+var _sortOpts={
+  containers:[{k:'az',l:'A \u2192 Z'},{k:'za',l:'Z \u2192 A'},{k:'count',l:'Item count'},{k:'loc',l:'By location'}],
+  tags:[{k:'count',l:'Most used'},{k:'az',l:'A \u2192 Z'},{k:'za',l:'Z \u2192 A'}]
+};
+var _sort={
+  containers:(function(){try{return localStorage.getItem('vault_sort_containers')||'az';}catch(e){return 'az';}})(),
+  tags:(function(){try{return localStorage.getItem('vault_sort_tags')||'count';}catch(e){return 'count';}})()
+};
+function _sortBar(target){
+  var opts=_sortOpts[target];
+  var cur=opts.find(function(o){return o.k===_sort[target];})||opts[0];
+  var next=opts[(opts.indexOf(cur)+1)%opts.length];
+  return '<div class="sortbar"><button class="sort-pill" data-target="'+target+'" data-next="'+next.k+'">\u2645 Sort:<b>'+esc(cur.l)+'</b></button></div>';
+}
+function _bindSortPills(){
+  document.querySelectorAll('.sort-pill').forEach(function(b){
+    b.addEventListener('click',function(){
+      var tgt=b.dataset.target,next=b.dataset.next;
+      _sort[tgt]=next;
+      try{localStorage.setItem('vault_sort_'+tgt,next);}catch(e){}
+      if(tgt==='tags')renderTags();else if(tgt==='containers')renderContainers();
+    });
+  });
+}
+function _cmpContainers(a,b){
+  var s=_sort.containers,ca=a.c,cb=b.c;
+  if(s==='za')return (cb.summary||cb.id||'').toLowerCase().localeCompare((ca.summary||ca.id||'').toLowerCase());
+  if(s==='count')return (icByC[cb.id]||0)-(icByC[ca.id]||0);
+  if(s==='loc')return (ca.location||'').toLowerCase().localeCompare((cb.location||'').toLowerCase());
+  return (ca.summary||ca.id||'').toLowerCase().localeCompare((cb.summary||cb.id||'').toLowerCase());
+}
+function _cmpTags(a,b){
+  var s=_sort.tags;
+  if(s==='az')return a[0].toLowerCase().localeCompare(b[0].toLowerCase());
+  if(s==='za')return b[0].toLowerCase().localeCompare(a[0].toLowerCase());
+  return b[1]-a[1];
+}
+
 // ---- RENDER ITEMS ----
 function renderItems(){
   var el=document.getElementById('v-items');
   var lq=q.toLowerCase().trim();
   var list=[];
   DB.items.forEach(function(item,idx){
-    if(lq){var r=resolveItem(item);if(!smartMatch([item.name,r.loc,r.unit,r.contId,r.posId,(item.tags||[]).join(' ')],q))return;}
     if(filters.length&&!filters.every(function(f){return(item.tags||[]).some(function(t){return t.toLowerCase()===f.toLowerCase();});}))return;
-    list.push({item:item,idx:idx});
+    if(lq){
+      var r=resolveItem(item);
+      if(!smartMatch([item.name,r.loc,r.unit,r.contId,r.posId,(item.tags||[]).join(' ')],q))return;
+      list.push({item:item,idx:idx,score:_scoreItemMatch(item,r,q)});
+    }else{
+      list.push({item:item,idx:idx});
+    }
   });
+  if(lq)list.sort(function(a,b){return (b.score||0)-(a.score||0);});
   document.getElementById('badge').textContent=list.length+' items'+(filters.length?' \u00b7 '+filters.length+' tags':'');
   if(!list.length){el.innerHTML='<div class="empty"><div class="empty-i">&#128269;</div><p>Nothing found</p></div>';return;}
   var h='';
@@ -2758,12 +2856,16 @@ function renderContainers(){
   var lq=q.toLowerCase().trim();
   var list=[];
   DB.containers.forEach(function(c,idx){
-    if(lq&&!smartMatch([c.id,c.summary,c.location,c.type],q))return;
     if(filters.length===1&&c.location.toLowerCase()!==filters[0].toLowerCase())return;
-    list.push({c:c,idx:idx});
+    if(lq&&!smartMatch([c.id,c.summary,c.location,c.type],q))return;
+    list.push({c:c,idx:idx,score:lq?_scoreContainerMatch(c,q):0});
   });
-  if(!list.length){el.innerHTML='<div class="empty"><div class="empty-i">&#128193;</div><p>No bins found</p></div>';return;}
-  var h='<div class="cgrid">';
+  list.sort(function(a,b){
+    if(lq){var sd=(b.score||0)-(a.score||0);if(sd!==0)return sd;}
+    return _cmpContainers(a,b);
+  });
+  if(!list.length){el.innerHTML=_sortBar('containers')+'<div class="empty"><div class="empty-i">&#128193;</div><p>No bins found</p></div>';_bindSortPills();return;}
+  var h=_sortBar('containers')+'<div class="cgrid">';
   list.forEach(function(e){
     var c=e.c;var cnt=icByC[c.id]||0;
     var ci=c.image?(function(){var srcs=getImageSources(c.image,'w400');return'<img src="'+esc(srcs.src)+'"'+(srcs.fallbacks.length?' data-alt-srcs="'+esc(srcs.fallbacks.join('||'))+'"':'')+' onerror="imgErr(this)" loading="lazy" decoding="async" fetchpriority="low" referrerpolicy="no-referrer" width="240" height="88"><span style="display:none;font-size:28px;">&#128230;</span>';})():'<span style="font-size:28px;">&#128230;</span>';
@@ -2771,6 +2873,7 @@ function renderContainers(){
   });
   h+='</div>';el.innerHTML=h;
   el.querySelectorAll('.ccard').forEach(function(r){r.addEventListener('click',function(){openContainerById(DB.containers[parseInt(r.dataset.idx)].id);});});
+  _bindSortPills();
 }
 
 // ---- RENDER LOCATIONS ----
@@ -2811,13 +2914,18 @@ function renderTags(){
   var el=document.getElementById('v-tags');
   var lq=q.toLowerCase().trim();
   var tc={};DB.items.forEach(function(i){(i.tags||[]).forEach(function(t){tc[t]=(tc[t]||0)+1;});});
-  var sorted=Object.entries(tc).sort(function(a,b){return b[1]-a[1];});
+  var sorted=Object.entries(tc);
   if(lq)sorted=sorted.filter(function(e){return smartMatch([e[0]],q);});
-  if(!sorted.length){el.innerHTML='<div class="empty"><div class="empty-i">&#128269;</div><p>No tags found</p></div>';return;}
-  var h='<div class="tgrid">';
+  sorted.sort(function(a,b){
+    if(lq){var sa=_scoreTagMatch(a[0],q),sb=_scoreTagMatch(b[0],q);if(sb!==sa)return sb-sa;}
+    return _cmpTags(a,b);
+  });
+  if(!sorted.length){el.innerHTML=_sortBar('tags')+'<div class="empty"><div class="empty-i">&#128269;</div><p>No tags found</p></div>';_bindSortPills();return;}
+  var h=_sortBar('tags')+'<div class="tgrid">';
   sorted.forEach(function(e){h+='<div class="ttile" data-t="'+esc(e[0])+'"><div class="temo">'+temo(e[0])+'</div><div class="tnm">'+esc(e[0])+'</div><div class="tcnt">'+e[1]+' items</div></div>';});
   h+='</div>';el.innerHTML=h;
   el.querySelectorAll('.ttile').forEach(function(r){r.addEventListener('click',function(){switchTab('items');filters=[r.dataset.t];q='';document.getElementById('si').value='';document.getElementById('sx').classList.remove('on');updateFbar();renderItems();});});
+  _bindSortPills();
 }
 
 // ---- DETAIL HELPERS ----
@@ -3521,7 +3629,7 @@ window.addEventListener('load',function(){
 // When the browser holds a cached older build, this shows a "Refresh now"
 // banner so he never keeps staring at a stale version.
 // Runs: ~3s after load, whenever the tab regains focus, and every 20 min.
-var APP_VERSION = 'v24';
+var APP_VERSION = 'v25';
 // Strip a leftover cache-buster from the URL so the home-screen bookmark stays clean.
 if(/[?&]_v=\d+/.test(location.search)){
   try{history.replaceState(null,'',location.pathname+location.hash);}catch(e){}
