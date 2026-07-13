@@ -574,6 +574,37 @@ body.kiosk #qtyCloseBtn{display:none !important;}
   .qty-name{font-size:24px;}
   .qty-value{font-size:54px;}
 }
+
+/* ── AUTO-UPDATE BANNER ── */
+.update-banner{
+  position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));
+  transform:translateX(-50%) translateY(30px);z-index:400;
+  opacity:0;pointer-events:none;
+  display:flex;align-items:center;gap:10px;padding:10px 10px 10px 16px;
+  background:linear-gradient(135deg,rgba(22,32,60,0.96),rgba(14,22,44,0.96));
+  border:1px solid rgba(240,192,64,0.5);border-radius:14px;
+  color:var(--txt);font-size:13px;font-weight:600;letter-spacing:.1px;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 12px 40px rgba(0,0,0,0.4),0 0 0 1px rgba(240,192,64,0.08);
+  transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .3s;
+  max-width:min(92vw,360px);
+}
+.update-banner.on{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0);}
+.update-banner .upd-msg{flex:1;line-height:1.35;}
+.update-banner .upd-msg b{color:var(--gold);font-weight:700;}
+.update-banner .upd-go{
+  background:var(--gold);color:var(--navy);border:none;border-radius:10px;
+  padding:8px 14px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;
+  cursor:pointer;transition:transform .15s,box-shadow .15s;
+  box-shadow:0 4px 14px rgba(240,192,64,0.28);flex-shrink:0;
+}
+.update-banner .upd-go:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(240,192,64,0.4);}
+.update-banner .upd-go:active{transform:translateY(0);opacity:.9;}
+.update-banner .upd-x{
+  background:transparent;color:var(--txt3);border:none;font-size:20px;line-height:1;
+  cursor:pointer;padding:4px 8px;border-radius:8px;transition:background .15s,color .15s;flex-shrink:0;
+}
+.update-banner .upd-x:hover{background:rgba(126,184,232,0.08);color:var(--txt);}
 </style>
 </head>
 <body>
@@ -628,7 +659,7 @@ body.kiosk #qtyCloseBtn{display:none !important;}
     <div class="account-action" onclick="exportCSV()">&#128196; Export CSV</div>
     <div class="account-action" onclick="openSyncDiagnostics()">&#128376; Sync diagnostics</div>
     <div class="account-action danger" onclick="signOut()">&#8594; Sign out</div>
-    <div class="account-version" id="acctVersion">Vault v22</div>
+    <div class="account-version" id="acctVersion">Vault v24</div>
   </div>
 </div>
 
@@ -2653,13 +2684,50 @@ async function resolvePhoto(urlInputId){
   return inp&&inp.value.trim()?gdThumb(inp.value.trim()):'';
 }
 
+// ---- SMART SEARCH ----
+// Handles "firefly" == "fire fly", punctuation, plural/tense variations, and single-char typos.
+// Priority order (cheapest → smartest): plain substring, then space/punct-insensitive substring,
+// then per-token match with a rough stem + tiny edit-distance tolerance.
+function _sm_norm(s){return String(s==null?'':s).toLowerCase().replace(/[\s\-_.,'"()\/\\!?&#]+/g,'');}
+function _sm_tok(s){return String(s==null?'':s).toLowerCase().split(/[\s\-_.,'"()\/\\!?&#]+/).filter(Boolean);}
+function _sm_stem(t){return t.length>4?t.replace(/(ies|es|ing|ed|s)$/,''):t;}
+function _sm_ed(a,b,k){if(a===b)return 0;var la=a.length,lb=b.length;if(Math.abs(la-lb)>k)return k+1;var dp=new Array(lb+1);for(var j=0;j<=lb;j++)dp[j]=j;for(var i=1;i<=la;i++){var prev=dp[0];dp[0]=i;var minR=i;for(var j2=1;j2<=lb;j2++){var t=dp[j2];dp[j2]=Math.min(dp[j2]+1,dp[j2-1]+1,prev+(a.charCodeAt(i-1)===b.charCodeAt(j2-1)?0:1));if(dp[j2]<minR)minR=dp[j2];prev=t;}if(minR>k)return k+1;}return dp[lb];}
+function smartMatch(fields,qStr){
+  if(!qStr)return true;
+  var joined=fields.filter(function(x){return x!=null&&x!=='';}).join(' ');
+  if(!joined)return false;
+  var lq=String(qStr).toLowerCase().trim();
+  if(!lq)return true;
+  var lj=joined.toLowerCase();
+  if(lj.indexOf(lq)>=0)return true;
+  var nq=_sm_norm(qStr);if(!nq)return false;
+  var nj=_sm_norm(joined);
+  if(nj.indexOf(nq)>=0)return true;
+  var qtoks=_sm_tok(qStr);if(!qtoks.length)return false;
+  var htoks=_sm_tok(joined);if(!htoks.length)return false;
+  var hstems=htoks.map(_sm_stem);
+  return qtoks.every(function(qt){
+    var st=_sm_stem(qt);
+    for(var i=0;i<htoks.length;i++){
+      var h=htoks[i],hs=hstems[i];
+      if(h.indexOf(qt)>=0||qt.indexOf(h)>=0)return true;
+      if(st&&hs===st)return true;
+      if(qt.length>=4){
+        var k=qt.length>=7?2:1;
+        if(_sm_ed(qt,h,k)<=k)return true;
+      }
+    }
+    return false;
+  });
+}
+
 // ---- RENDER ITEMS ----
 function renderItems(){
   var el=document.getElementById('v-items');
   var lq=q.toLowerCase().trim();
   var list=[];
   DB.items.forEach(function(item,idx){
-    if(lq){var r=resolveItem(item);var s=item.name.toLowerCase()+r.loc.toLowerCase()+r.unit.toLowerCase()+r.contId.toLowerCase()+(r.posId||'').toLowerCase()+(item.tags||[]).join(' ').toLowerCase();if(s.indexOf(lq)<0)return;}
+    if(lq){var r=resolveItem(item);if(!smartMatch([item.name,r.loc,r.unit,r.contId,r.posId,(item.tags||[]).join(' ')],q))return;}
     if(filters.length&&!filters.every(function(f){return(item.tags||[]).some(function(t){return t.toLowerCase()===f.toLowerCase();});}))return;
     list.push({item:item,idx:idx});
   });
@@ -2690,7 +2758,7 @@ function renderContainers(){
   var lq=q.toLowerCase().trim();
   var list=[];
   DB.containers.forEach(function(c,idx){
-    if(lq&&(c.id+c.summary+c.location+c.type).toLowerCase().indexOf(lq)<0)return;
+    if(lq&&!smartMatch([c.id,c.summary,c.location,c.type],q))return;
     if(filters.length===1&&c.location.toLowerCase()!==filters[0].toLowerCase())return;
     list.push({c:c,idx:idx});
   });
@@ -2708,23 +2776,30 @@ function renderContainers(){
 // ---- RENDER LOCATIONS ----
 function renderLocations(){
   var el=document.getElementById('v-locations');var h='';
+  var lq=q.toLowerCase().trim();
   DB.locations.forEach(function(loc){
+    if(lq&&!smartMatch([loc.name,loc.notes],q))return;
     var ic=DB.items.filter(function(i){return(i.location||resolveItem(i).loc)===loc.name;}).length;
     var cc=DB.containers.filter(function(c){return c.location===loc.name;}).length;
     var sc=DB.items.filter(function(i){var r=resolveItem(i);return(r.loc===loc.name&&!r.contId&&r.posId);}).length;
     h+='<div class="lcard" data-n="'+esc(loc.name)+'"><div class="lhdr"><div class="lico">'+lemo(loc.name)+'</div><div><div class="ln">'+esc(loc.name)+'</div><div class="lsub">'+esc(loc.notes||'Storage location')+'</div></div></div><div class="lstats"><div class="sp"><strong>'+ic+'</strong>items</div><div class="sp"><strong>'+cc+'</strong>bins</div><div class="sp"><strong>'+sc+'</strong>shelved</div></div></div>';
   });
-  h+='<div class="sh">UNITS &amp; SHELVES</div>';
+  var uh='';
   DB.units.forEach(function(u){
+    if(lq&&!smartMatch([u.name,u.location],q))return;
     var ic=DB.items.filter(function(i){return(i.unit||resolveItem(i).unit)===u.name;}).length;
     var cc=DB.containers.filter(function(c){return c.unit===u.name;}).length;
-    h+='<div class="lcard" data-u="'+esc(u.name)+'"><div class="lhdr"><div class="lico">&#128451;&#65039;</div><div><div class="ln">'+esc(u.name)+'</div><div class="lsub">'+esc(u.location)+'</div></div></div><div class="lstats"><div class="sp"><strong>'+ic+'</strong>items</div><div class="sp"><strong>'+cc+'</strong>bins</div><div class="sp"><strong>'+(u.shelves||[]).length+'</strong>shelves</div></div></div>';
+    uh+='<div class="lcard" data-u="'+esc(u.name)+'"><div class="lhdr"><div class="lico">&#128451;&#65039;</div><div><div class="ln">'+esc(u.name)+'</div><div class="lsub">'+esc(u.location)+'</div></div></div><div class="lstats"><div class="sp"><strong>'+ic+'</strong>items</div><div class="sp"><strong>'+cc+'</strong>bins</div><div class="sp"><strong>'+(u.shelves||[]).length+'</strong>shelves</div></div></div>';
   });
-  h+='<div class="sh">SHELF POSITIONS</div>';
+  if(uh)h+='<div class="sh">UNITS &amp; SHELVES</div>'+uh;
+  var ph='';
   DB.positions.forEach(function(p){
+    if(lq&&!smartMatch([p.id,p.unit,p.location],q))return;
     var ic=DB.items.filter(function(i){return resolveItem(i).posId===p.id;}).length;if(!ic)return;
-    h+='<div class="lcard" data-p="'+esc(p.id)+'"><div class="lhdr"><div class="lico">&#128208;</div><div><div class="ln">'+esc(p.id)+'</div><div class="lsub">'+esc(p.unit)+' \u203a '+esc(p.location)+'</div></div></div><div class="lstats"><div class="sp"><strong>'+ic+'</strong>items</div></div></div>';
+    ph+='<div class="lcard" data-p="'+esc(p.id)+'"><div class="lhdr"><div class="lico">&#128208;</div><div><div class="ln">'+esc(p.id)+'</div><div class="lsub">'+esc(p.unit)+' \u203a '+esc(p.location)+'</div></div></div><div class="lstats"><div class="sp"><strong>'+ic+'</strong>items</div></div></div>';
   });
+  if(ph)h+='<div class="sh">SHELF POSITIONS</div>'+ph;
+  if(!h)h='<div class="empty"><div class="empty-i">&#128269;</div><p>Nothing found</p></div>';
   el.innerHTML=h;
   el.querySelectorAll('[data-n]').forEach(function(r){r.addEventListener('click',function(){openLocation(r.dataset.n);});});
   el.querySelectorAll('[data-u]').forEach(function(r){r.addEventListener('click',function(){openUnit(r.dataset.u);});});
@@ -2734,8 +2809,11 @@ function renderLocations(){
 // ---- RENDER TAGS ----
 function renderTags(){
   var el=document.getElementById('v-tags');
+  var lq=q.toLowerCase().trim();
   var tc={};DB.items.forEach(function(i){(i.tags||[]).forEach(function(t){tc[t]=(tc[t]||0)+1;});});
   var sorted=Object.entries(tc).sort(function(a,b){return b[1]-a[1];});
+  if(lq)sorted=sorted.filter(function(e){return smartMatch([e[0]],q);});
+  if(!sorted.length){el.innerHTML='<div class="empty"><div class="empty-i">&#128269;</div><p>No tags found</p></div>';return;}
   var h='<div class="tgrid">';
   sorted.forEach(function(e){h+='<div class="ttile" data-t="'+esc(e[0])+'"><div class="temo">'+temo(e[0])+'</div><div class="tnm">'+esc(e[0])+'</div><div class="tcnt">'+e[1]+' items</div></div>';});
   h+='</div>';el.innerHTML=h;
@@ -3437,6 +3515,64 @@ window.addEventListener('load',function(){
     }
   },800);
 });
+
+// ---- AUTO-UPDATE CHECK ----
+// This app is served from GitHub Pages and lives on Josiah's home screen.
+// When the browser holds a cached older build, this shows a "Refresh now"
+// banner so he never keeps staring at a stale version.
+// Runs: ~3s after load, whenever the tab regains focus, and every 20 min.
+var APP_VERSION = 'v24';
+// Strip a leftover cache-buster from the URL so the home-screen bookmark stays clean.
+if(/[?&]_v=\d+/.test(location.search)){
+  try{history.replaceState(null,'',location.pathname+location.hash);}catch(e){}
+}
+var _updateCheckAt=0,_updateBannerShown=false;
+async function _checkForUpdate(){
+  var now=Date.now();
+  if(now-_updateCheckAt<60000)return; // 1/min max
+  _updateCheckAt=now;
+  if(_updateBannerShown)return;
+  try{
+    var r=await fetch('./index.html?_uc='+now,{cache:'no-store'});
+    if(!r.ok)return;
+    var t=await r.text();
+    // Match the account-version tag, e.g. `>Vault v24<`.
+    var m=t.match(/>Vault v(\d+)</);
+    if(!m)return;
+    var localMatch=APP_VERSION.match(/v?(\d+)/);
+    if(!localMatch)return;
+    if(parseInt(m[1],10)<=parseInt(localMatch[1],10))return;
+    _showUpdateBanner('v'+m[1]);
+  }catch(e){/* offline or fetch blocked */}
+}
+function _showUpdateBanner(newVer){
+  if(sessionStorage.getItem('vault_upd_dismiss_'+newVer)==='1')return;
+  _updateBannerShown=true;
+  var b=document.getElementById('updateBanner');
+  if(!b){
+    b=document.createElement('div');
+    b.id='updateBanner';b.className='update-banner';
+    b.innerHTML='<span class="upd-msg">✨ Update available (<b class="upd-ver"></b>)</span>'+
+                '<button class="upd-go" type="button">Refresh</button>'+
+                '<button class="upd-x" type="button" aria-label="Dismiss">×</button>';
+    document.body.appendChild(b);
+    b.querySelector('.upd-go').addEventListener('click',function(){
+      // Cache-bust with a query string so GitHub Pages / browser cache returns fresh HTML.
+      location.replace(location.pathname+'?_v='+Date.now()+location.hash);
+    });
+    b.querySelector('.upd-x').addEventListener('click',function(){
+      sessionStorage.setItem('vault_upd_dismiss_'+b.dataset.ver,'1');
+      b.classList.remove('on');
+      _updateBannerShown=false;
+    });
+  }
+  b.dataset.ver=newVer;
+  b.querySelector('.upd-ver').textContent=newVer;
+  requestAnimationFrame(function(){b.classList.add('on');});
+}
+window.addEventListener('load',function(){setTimeout(_checkForUpdate,3000);});
+document.addEventListener('visibilitychange',function(){if(!document.hidden)_checkForUpdate();});
+setInterval(_checkForUpdate,20*60*1000);
 </script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js" async defer></script>
 <script src="https://accounts.google.com/gsi/client" async defer onload="tryAutoSignIn()"></script>
