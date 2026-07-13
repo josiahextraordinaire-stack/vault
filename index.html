@@ -617,6 +617,10 @@ body.kiosk #qtyCloseBtn{display:none !important;}
 .sort-pill b{color:var(--gold);font-weight:700;margin-left:2px;}
 .sort-pill:hover{border-color:rgba(240,192,64,0.3);background:rgba(126,184,232,0.04);}
 .sort-pill:active{opacity:.75;transform:scale(.97);}
+
+/* ── TAG SEARCH INPUT (Add/Edit Item forms) ── */
+.tag-search{margin-bottom:8px;font-size:13px;padding:9px 12px;}
+.tag-search::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;}
 </style>
 </head>
 <body>
@@ -671,7 +675,7 @@ body.kiosk #qtyCloseBtn{display:none !important;}
     <div class="account-action" onclick="exportCSV()">&#128196; Export CSV</div>
     <div class="account-action" onclick="openSyncDiagnostics()">&#128376; Sync diagnostics</div>
     <div class="account-action danger" onclick="signOut()">&#8594; Sign out</div>
-    <div class="account-version" id="acctVersion">Vault v25</div>
+    <div class="account-version" id="acctVersion">Vault v26</div>
   </div>
 </div>
 
@@ -2733,6 +2737,21 @@ function smartMatch(fields,qStr){
   });
 }
 
+// Live-filter the tag chip grid in Add Item / Edit Item forms. Uses smartMatch so
+// space/punct/typo variants still hit. Only visibility is toggled — a chip's .on state
+// (selection) is preserved so hidden selections still save.
+function _bindTagSearch(inputId,gridId){
+  var inp=document.getElementById(inputId),grid=document.getElementById(gridId);
+  if(!inp||!grid)return;
+  inp.addEventListener('input',function(){
+    var qv=(inp.value||'').trim();
+    grid.querySelectorAll('.tag-sel').forEach(function(b){
+      if(!qv){b.style.display='';return;}
+      b.style.display=smartMatch([b.dataset.tag],qv)?'':'none';
+    });
+  });
+}
+
 // ---- SEARCH RANKING + USER SORT ORDER ----
 // Ranks by where/what matched. Name > tag > location; earlier position > later; shorter name breaks ties.
 function _scoreItemMatch(item,r,qStr){
@@ -3055,13 +3074,13 @@ function bindItemFormInputs(prefix,hooks){
   if(newBinId)newBinId.addEventListener('input',function(){refreshSubcontainers('');});
   if(subEl)subEl.addEventListener('change',function(){
     showPanel(prefix+'-newsub-wrap',subEl.value==='__new__');
-    // If user picks a sub that already lives inside a real bin, snap the Bin
-    // dropdown (and downstream location/unit/shelf) to that bin so the saved
-    // item keeps a consistent path.
+    // If the user picked a sub that already lives inside a real bin AND they haven't
+    // chosen a bin yet, pre-fill the Bin dropdown from the sub. If they already picked
+    // a bin, respect their choice — on save we'll move the sub to that bin.
     var v=subEl.value;
     if(v&&v!=='__new__'&&sById[v]&&sById[v].inContainer&&cById[sById[v].inContainer]){
       var targetBin=sById[v].inContainer;
-      if(contEl&&contEl.value!==targetBin){
+      if(contEl&&!contEl.value){
         contEl.value=targetBin;
         var cont=cById[targetBin];
         var locEl=document.getElementById(prefix+'-loc');
@@ -3214,7 +3233,7 @@ function openEditItem(idx){
   h+='<div id="e-newunit-wrap" class="inline-new" hidden><div class="inline-lbl">&#43; New Unit</div><div class="form-lbl">Unit Name *</div><input id="e-newunit-name" class="form-input" type="text" placeholder="e.g. Shelf 3"></div>';
   h+='<div class="form-field"><div class="form-lbl">Shelf Position</div><select id="e-pos" class="form-select">'+posOpts+'</select></div>';
   h+='<div id="e-newpos-wrap" class="inline-new" hidden><div class="inline-lbl">&#43; New Shelf Position</div><div class="form-lbl">Shelf ID *</div><input id="e-newpos-id" class="form-input" type="text" placeholder="e.g. LR - 5"></div>';
-  h+='<div class="form-field"><div class="form-lbl">Tags</div><div class="tag-grid-sel" id="e-tags">'+allTags.map(function(t){return'<button type="button" class="tag-sel'+((i.tags||[]).indexOf(t)>=0?' on':'')+'" data-tag="'+esc(t)+'">'+esc(t)+'</button>';}).join('')+'</div><div class="new-tag-row"><input id="e-newtag" type="text" placeholder="New tag\u2026"><button type="button" onclick="addEditTag()">Add</button></div></div>';
+  h+='<div class="form-field"><div class="form-lbl">Tags</div><input class="tag-search form-input" id="e-tagsearch" type="search" placeholder="&#128269; Filter tags\u2026" autocomplete="off"><div class="tag-grid-sel" id="e-tags">'+allTags.map(function(t){return'<button type="button" class="tag-sel'+((i.tags||[]).indexOf(t)>=0?' on':'')+'" data-tag="'+esc(t)+'">'+esc(t)+'</button>';}).join('')+'</div><div class="new-tag-row"><input id="e-newtag" type="text" placeholder="New tag\u2026"><button type="button" onclick="addEditTag()">Add</button></div></div>';
   h+='<div class="toggle-card"><div class="toggle-copy"><div class="toggle-title">Track quantity</div><div class="toggle-desc">Only items with quantity tracking turned on will show reorder alerts and QR quantity tools.</div></div><label class="toggle-switch"><input type="checkbox" id="e-trackqty"'+(i.trackQuantity?' checked':'')+'> On</label></div>';
   h+='<div id="e-qty-wrap" class="inline-new" hidden><div class="inline-lbl">Quantity Tracking</div><div class="inline-grid"><div><div class="form-lbl">Current Quantity</div><input id="e-qty" class="form-input" type="number" inputmode="numeric" min="0" value="'+i.quantity+'"></div><div><div class="form-lbl">Minimum Quantity</div><input id="e-minqty" class="form-input" type="number" inputmode="numeric" min="0" value="'+i.minQuantity+'"></div></div></div>';
   h+='<button type="button" class="btn-primary" id="e-save-btn" onclick="saveEditItem('+idx+')">Save Changes</button>';
@@ -3222,6 +3241,7 @@ function openEditItem(idx){
   openDetail('Edit: '+i.name,h,'');
   setTimeout(function(){
     document.querySelectorAll('#e-tags .tag-sel').forEach(function(b){b.addEventListener('click',function(){b.classList.toggle('on');});});
+    _bindTagSearch('e-tagsearch','e-tags');
     setupPhotoArea('e-photo-area','e-photo-file');
     bindQuantityToggle('e');
     var hooks=bindPlacementInputs('e');
@@ -3249,6 +3269,8 @@ async function saveEditItem(idx){
   }
   if(path.unit&&!path.loc&&uById[path.unit])path.loc=uById[path.unit].location||'';
   var sub=materializeSubcontainerFromForm('e',cont);if(sub===null){btn.disabled=false;btn.textContent='Save Changes';return;}
+  // Link the subcontainer to the chosen bin (or move it there if it lived elsewhere / was unassigned).
+  if(sub&&cont&&sById[sub]&&sById[sub].inContainer!==cont)sById[sub].inContainer=cont;
   var tags=[];document.querySelectorAll('#e-tags .tag-sel.on').forEach(function(b){tags.push(b.dataset.tag);});
   var qty=readQuantityFields('e');
   if(i.container&&i.container!==cont){icByC[i.container]=Math.max(0,(icByC[i.container]||1)-1);}
@@ -3411,11 +3433,24 @@ function saveSubcontainer(){
   var idEl=document.getElementById('s-id');
   var id=(idEl.value||'').trim();
   if(!id){markInvalid('s-id');idEl.focus();return;}
-  if(sById[id]){alert('Subcontainer #'+id+' already exists!');return;}
-  var btn=document.getElementById('s-save-btn');btn.disabled=true;btn.textContent='Saving\u2026';
   var summary=(document.getElementById('s-summary').value||'').trim();
   var type=(document.getElementById('s-type').value||'').trim();
   var inCont=(document.getElementById('s-incont').value||'').trim();
+  // If the sub already exists, offer to move / update it rather than aborting.
+  if(sById[id]){
+    var ex=sById[id];
+    var where=ex.inContainer?('Bin #'+ex.inContainer):'unassigned';
+    if(!inCont){alert('Subcontainer #'+id+' already exists ('+where+'). Pick a bin below and save again to move it, or use a different ID.');return;}
+    if(ex.inContainer===inCont){alert('Subcontainer #'+id+' is already in Bin #'+inCont+'.');return;}
+    if(!confirm('Subcontainer #'+id+' already exists ('+where+'). Move it to Bin #'+inCont+'?'))return;
+    ex.inContainer=inCont;
+    if(summary)ex.summary=summary;
+    if(type)ex.type=type;
+    saveToDrive();document.getElementById('dp').classList.remove('on');renderCurrent();
+    flash('\u2713 Subcontainer #'+id+' moved to Bin #'+inCont+'!');
+    return;
+  }
+  var btn=document.getElementById('s-save-btn');btn.disabled=true;btn.textContent='Saving\u2026';
   var sub={id:id,summary:summary,type:type,items:[],inContainer:inCont};
   DB.subcontainers.push(sub);
   sById[id]=sub;
@@ -3445,13 +3480,14 @@ function renderItemForm(){
   h+='<div id="f-newunit-wrap" class="inline-new" hidden><div class="inline-lbl">&#43; New Unit</div><div class="form-lbl">Unit Name *</div><input id="f-newunit-name" class="form-input" type="text" placeholder="e.g. Shelf 2"></div>';
   h+='<div class="form-field"><div class="form-lbl">Shelf Position</div><select id="f-pos" class="form-select">'+posOpts+'</select></div>';
   h+='<div id="f-newpos-wrap" class="inline-new" hidden><div class="inline-lbl">&#43; New Shelf Position</div><div class="form-lbl">Shelf ID *</div><input id="f-newpos-id" class="form-input" type="text" placeholder="e.g. LR - 3"></div>';
-  h+='<div class="form-field"><div class="form-lbl">Tags</div><div class="tag-grid-sel" id="f-tags">'+allTags.map(function(t){return'<button type="button" class="tag-sel" data-tag="'+esc(t)+'">'+esc(t)+'</button>';}).join('')+'</div><div class="new-tag-row"><input id="f-newtag" type="text" placeholder="New tag\u2026"><button type="button" onclick="addTagToForm()">Add</button></div></div>';
+  h+='<div class="form-field"><div class="form-lbl">Tags</div><input class="tag-search form-input" id="f-tagsearch" type="search" placeholder="&#128269; Filter tags\u2026" autocomplete="off"><div class="tag-grid-sel" id="f-tags">'+allTags.map(function(t){return'<button type="button" class="tag-sel" data-tag="'+esc(t)+'">'+esc(t)+'</button>';}).join('')+'</div><div class="new-tag-row"><input id="f-newtag" type="text" placeholder="New tag\u2026"><button type="button" onclick="addTagToForm()">Add</button></div></div>';
   h+='<div class="toggle-card"><div class="toggle-copy"><div class="toggle-title">Track quantity</div><div class="toggle-desc">Turn this on only for items you want low-stock alerts and QR quantity shortcuts for.</div></div><label class="toggle-switch"><input type="checkbox" id="f-trackqty"> On</label></div>';
   h+='<div id="f-qty-wrap" class="inline-new" hidden><div class="inline-lbl">Quantity Tracking</div><div class="inline-grid"><div><div class="form-lbl">Current Quantity</div><input id="f-qty" class="form-input" type="number" inputmode="numeric" min="0" value="0"></div><div><div class="form-lbl">Minimum Quantity</div><input id="f-minqty" class="form-input" type="number" inputmode="numeric" min="0" value="0"></div></div></div>';
   h+='<button type="button" class="btn-primary" id="f-save-btn" onclick="saveItem()">Save Item</button></div>';
   openDetail('Add New Item',h,'');
   setTimeout(function(){
     document.querySelectorAll('#f-tags .tag-sel').forEach(function(b){b.addEventListener('click',function(){b.classList.toggle('on');});});
+    _bindTagSearch('f-tagsearch','f-tags');
     setupPhotoArea('f-photo-area','f-photo-file');
     bindQuantityToggle('f');
     var hooks=bindPlacementInputs('f');
@@ -3478,6 +3514,8 @@ async function saveItem(){
   }
   if(path.unit&&!path.loc&&uById[path.unit])path.loc=uById[path.unit].location||'';
   var subId=materializeSubcontainerFromForm('f',contId);if(subId===null){btn.disabled=false;btn.textContent='Save Item';return;}
+  // Link the subcontainer to the chosen bin (or move it there if it lived elsewhere / was unassigned).
+  if(subId&&contId&&sById[subId]&&sById[subId].inContainer!==contId)sById[subId].inContainer=contId;
   var tags=[];document.querySelectorAll('#f-tags .tag-sel.on').forEach(function(b){tags.push(b.dataset.tag);});
   var qty=readQuantityFields('f');
   DB.items.push(normalizeItem({name:name,image:photoUrl,position:path.pos,container:contId,subcontainer:subId,subsubcontainer:'',tags:tags,location:path.loc,unit:path.unit,trackQuantity:qty.trackQuantity,quantity:qty.quantity,minQuantity:qty.minQuantity,updatedAt:Date.now()},DB.items.length));
@@ -3629,7 +3667,7 @@ window.addEventListener('load',function(){
 // When the browser holds a cached older build, this shows a "Refresh now"
 // banner so he never keeps staring at a stale version.
 // Runs: ~3s after load, whenever the tab regains focus, and every 20 min.
-var APP_VERSION = 'v25';
+var APP_VERSION = 'v26';
 // Strip a leftover cache-buster from the URL so the home-screen bookmark stays clean.
 if(/[?&]_v=\d+/.test(location.search)){
   try{history.replaceState(null,'',location.pathname+location.hash);}catch(e){}
